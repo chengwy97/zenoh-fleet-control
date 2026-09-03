@@ -1,0 +1,11 @@
+{
+  "username": "eame",
+  "device_id": "dev_local",
+  "session_id": "sess_local",
+  "root": "/home/eame/cwy/zenoh/zenoh-fleet-control",
+  "cwd": "/home/eame/cwy/zenoh/zenoh-fleet-control",
+  "name": "local-agent",
+  "connect": "tcp/127.0.0.1:7447",
+  "transfer_backend": "local_spool",
+  "transfer_store": "/home/eame/cwy/zenoh/zenoh-fleet-control/.zfc/transfers"
+}

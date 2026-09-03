@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zfc-file-api"
+version = "0.1.0"
+description = "Authenticated file transfer API for zenoh-fleet-control"
+requires-python = ">=3.10"
+dependencies = [
+    "boto3>=1.34",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+]
+
+[project.scripts]
+zfc-file-api = "zfc_file_api.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

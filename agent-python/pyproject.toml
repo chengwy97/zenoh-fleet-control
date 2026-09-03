@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zfc-agent"
+version = "0.1.0"
+description = "Python validation agent for zenoh-fleet-control"
+requires-python = ">=3.10"
+dependencies = [
+    "eclipse-zenoh>=1.0.0",
+]
+
+[project.scripts]
+zfc-agent = "zfc_agent.main:main"
+zfc-send-command = "zfc_agent.tools.send_command:main"
+zfc-watch-session = "zfc_agent.tools.watch_session:main"
+zfc-send-control = "zfc_agent.tools.send_control:main"
+zfc-send-media = "zfc_agent.tools.send_media:main"
+zfc-list-dir = "zfc_agent.tools.list_dir:main"
+zfc-send-transfer = "zfc_agent.tools.send_transfer:main"
+zfc-fetch-transfer = "zfc_agent.tools.fetch_transfer:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
