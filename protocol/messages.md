@@ -235,15 +235,26 @@ App 不应发送 `local_path`。agent 自己通过 `asset_id` 查找已校验的
 {
   "version": "v1",
   "transfer_id": "transfer_001",
-  "backend": "local_spool",
-  "uri": "file:///tmp/zfc/transfers/transfer_001.zip",
+  "backend": "s3",
+  "uri": "s3://zfc-transfers/u/eame/fleet/dev_001/sessions/sess_001/transfers/transfer_001/src.zip",
   "name": "src",
   "archive": "zip",
   "size": 123456,
   "sha256": "...",
+  "bucket": "zfc-transfers",
+  "object_key": "u/eame/fleet/dev_001/sessions/sess_001/transfers/transfer_001/src.zip",
+  "download_url": "https://example.invalid/presigned-download",
+  "expires_at": 1725330900,
   "created_at": 1725330000
 }
 ```
+
+字段约定：
+
+- `backend=local_spool` 仅用于单机验证，`uri` 为 `file://...`。
+- `backend=s3` / `minio` 用于真实手机和跨设备文件传输，`uri` 是稳定对象引用。
+- `upload_url` 只由 file-api 返回给上传方，不通过 Zenoh 广播。
+- `download_url` 是短期 URL，可以放在 `TransferRef` 中便于立即下载；如果缺失或过期，客户端用 `transfer_id/name/size/sha256` 向 file-api 刷新。
 
 ### Import transfer
 
@@ -274,7 +285,7 @@ App 从当前 session cwd 取回文件或目录：
 
 Agent 返回 `transfer_export_ready`，其中包含 `TransferRef`。App 根据后端下载或还原内容。
 
-生产部署建议使用 `tus` 或 `s3` / `minio` 后端，`local_spool` 只用于单机验证和协议开发。
+生产部署建议使用 `s3` / `minio` 后端，`local_spool` 只用于单机验证和协议开发。`tus` 可作为后续断点续传上传实现，但不改变 Zenoh 命令语义。
 
 
 ```json

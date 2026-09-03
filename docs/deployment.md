@@ -65,3 +65,14 @@ s3://zfc-transfers/u/eame/fleet/dev-minio-test/sessions/sess-minio-test/transfer
 Uploading through the presigned PUT URL and downloading through the presigned GET URL both succeeded. Requests without `Authorization: Bearer <token>` returned `401`.
 
 生产环境不要把 MinIO 管理端口直接暴露给公网；App 和 Agent 应通过 file-api 获取受限的短期 URL。
+
+
+## Local Transfer Verification
+
+Run the local end-to-end check after Docker and Python dependencies are available:
+
+```bash
+./scripts/verify-file-api-minio.sh
+```
+
+It starts MinIO, zfc-file-api, zenohd, and a Python agent, then verifies S3-backed import/export through Zenoh commands.

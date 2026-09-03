@@ -21,10 +21,20 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--transfer-backend", default="local_spool", choices=["local_spool", "tus", "s3", "minio"])
     parser.add_argument("--transfer-store", default=".zfc/client-transfers")
+    parser.add_argument("--file-api-url")
+    parser.add_argument("--file-api-token")
     parser.add_argument("--connect")
     args = parser.parse_args()
 
-    backend = backend_from_config(args.transfer_backend, Path(args.transfer_store))
+    backend = backend_from_config(
+        args.transfer_backend,
+        Path(args.transfer_store),
+        username=args.username,
+        device_id=args.device_id,
+        session_id=args.session_id,
+        file_api_url=args.file_api_url,
+        file_api_token=args.file_api_token,
+    )
     cmd_id = f"cmd_{uuid.uuid4().hex}"
     keyspace = Keyspace(args.username, args.device_id, args.session_id)
     session = open_session(args.connect)

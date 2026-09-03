@@ -119,6 +119,6 @@ zfc-fetch-transfer --username eame --device-id dev_local --session-id sess_local
   --path . --output-dir /tmp/zfc-download
 ```
 
-The command semantics are intended to stay stable when replacing `local_spool` with `tus`, `s3`, or `minio`.
+The command semantics stay stable across `local_spool` and the file-api backed `s3`/`minio` backend.
 
-`local_spool` requires a shared filesystem path between the validation CLI and the agent. For a real phone app, replace it with `tus`, `s3`, or `minio` so the transfer reference points to an HTTP/object-storage endpoint instead of `file://`.
+`local_spool` requires a shared filesystem path between the validation CLI and the agent. For a real phone app, use `s3` or `minio` with `--file-api-url` and `--file-api-token`; file bytes go through presigned HTTP URLs while Zenoh only carries commands and `TransferRef`.

@@ -3,54 +3,112 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 API_DIR="$ROOT_DIR/file-api"
+AGENT_DIR="$ROOT_DIR/agent-python"
+ZENOH_BIN=${ZENOH_BIN:-/home/eame/Documents/magiclab/zenoh/zenoh/target/release/zenohd}
+FILE_API_URL=${ZFC_FILE_API_URL:-http://127.0.0.1:8080}
+FILE_API_TOKEN=${ZFC_FILE_API_TOKEN:-dev-token-change-me}
+ZENOH_CONNECT=${ZFC_CONNECT:-tcp/127.0.0.1:7447}
 
-cd "$ROOT_DIR/deploy/local"
+API_PID=
+ZENOH_PID=
+AGENT_PID=
+WORK_DIR=$(mktemp -d)
+COMPOSE_DIR="$ROOT_DIR/deploy/local"
+
+cleanup() {
+  if [[ -n "${AGENT_PID}" ]]; then kill "${AGENT_PID}" 2>/dev/null || true; fi
+  if [[ -n "${ZENOH_PID}" ]]; then kill "${ZENOH_PID}" 2>/dev/null || true; fi
+  if [[ -n "${API_PID}" ]]; then kill "${API_PID}" 2>/dev/null || true; fi
+  docker compose -f "${COMPOSE_DIR}/docker-compose.yml" down >/dev/null 2>&1 || true
+  rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+wait_http() {
+  local url=$1
+  for _ in $(seq 1 60); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "timed out waiting for $url" >&2
+  return 1
+}
+
+cd "$COMPOSE_DIR"
 docker compose up -d minio
 
 cd "$API_DIR"
 python3 -m venv .venv
-.venv/bin/pip install -e .
-
+.venv/bin/pip install -q -e .
 ZFC_S3_ENDPOINT=${ZFC_S3_ENDPOINT:-http://127.0.0.1:9000} \
 ZFC_S3_ACCESS_KEY=${ZFC_S3_ACCESS_KEY:-zfcadmin} \
 ZFC_S3_SECRET_KEY=${ZFC_S3_SECRET_KEY:-zfcadmin123} \
 ZFC_S3_BUCKET=${ZFC_S3_BUCKET:-zfc-transfers} \
-ZFC_FILE_AUTH_TOKEN=${ZFC_FILE_AUTH_TOKEN:-dev-token-change-me} \
-.venv/bin/python - <<'PYTEST'
-import hashlib
-import json
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+ZFC_FILE_AUTH_TOKEN=${FILE_API_TOKEN} \
+.venv/bin/uvicorn zfc_file_api.api:app --host 127.0.0.1 --port 8080 >"$WORK_DIR/file-api.log" 2>&1 &
+API_PID=$!
+wait_http "$FILE_API_URL/healthz"
 
-from zfc_file_api.api import create_app
+cd "$AGENT_DIR"
+python3 -m venv .venv
+.venv/bin/pip install -q -e .
 
-# Import smoke test first; run the HTTP check against a separately started zfc-file-api.
-print(create_app().title)
+if [[ ! -x "$ZENOH_BIN" ]]; then
+  echo "zenohd not found or not executable: $ZENOH_BIN" >&2
+  exit 1
+fi
+"$ZENOH_BIN" -l "$ZENOH_CONNECT" >"$WORK_DIR/zenohd.log" 2>&1 &
+ZENOH_PID=$!
+sleep 1
 
-base = 'http://127.0.0.1:8080'
-token = 'Bearer dev-token-change-me'
-payload = b'zfc file api verification\n'
-digest = hashlib.sha256(payload).hexdigest()
-request_data = json.dumps({
-    'username': 'eame',
-    'device_id': 'dev-file-api',
-    'session_id': 'sess-file-api',
-    'name': 'payload.zip',
-    'archive': 'zip',
-    'size': len(payload),
-    'sha256': digest,
-}).encode()
-try:
-    urlopen(Request(base + '/v1/transfers/uploads', data=b'{}', method='POST', headers={'Content-Type': 'application/json'}), timeout=5)
-except HTTPError as exc:
-    assert exc.code == 401
-request = Request(base + '/v1/transfers/uploads', data=request_data, method='POST', headers={'Authorization': token, 'Content-Type': 'application/json'})
-with urlopen(request, timeout=10) as response:
-    ref = json.load(response)
-with urlopen(Request(ref['upload_url'], data=payload, method='PUT'), timeout=10) as response:
-    assert response.status in (200, 204)
-with urlopen(Request(ref['download_url'], method='GET'), timeout=10) as response:
-    assert response.read() == payload
-print(ref['transfer_id'])
-print('file api minio ok')
-PYTEST
+mkdir -p "$WORK_DIR/agent-root" "$WORK_DIR/app-source" "$WORK_DIR/app-output"
+printf 'hello through minio\n' >"$WORK_DIR/app-source/hello.txt"
+
+.venv/bin/zfc-agent \
+  --username eame \
+  --device-id dev_minio \
+  --session-id sess_minio \
+  --root "$WORK_DIR/agent-root" \
+  --cwd "$WORK_DIR/agent-root" \
+  --connect "$ZENOH_CONNECT" \
+  --transfer-backend s3 \
+  --transfer-store "$WORK_DIR/agent-cache" \
+  --file-api-url "$FILE_API_URL" \
+  --file-api-token "$FILE_API_TOKEN" \
+  >"$WORK_DIR/agent.log" 2>&1 &
+AGENT_PID=$!
+sleep 2
+
+.venv/bin/zfc-send-transfer \
+  --username eame \
+  --device-id dev_minio \
+  --session-id sess_minio \
+  --path "$WORK_DIR/app-source" \
+  --target-path . \
+  --connect "$ZENOH_CONNECT" \
+  --transfer-backend s3 \
+  --transfer-store "$WORK_DIR/client-cache" \
+  --file-api-url "$FILE_API_URL" \
+  --file-api-token "$FILE_API_TOKEN"
+
+sleep 2
+test -f "$WORK_DIR/agent-root/app-source/hello.txt"
+cmp "$WORK_DIR/app-source/hello.txt" "$WORK_DIR/agent-root/app-source/hello.txt"
+
+.venv/bin/zfc-fetch-transfer \
+  --username eame \
+  --device-id dev_minio \
+  --session-id sess_minio \
+  --path app-source \
+  --output-dir "$WORK_DIR/app-output" \
+  --connect "$ZENOH_CONNECT" \
+  --transfer-backend s3 \
+  --transfer-store "$WORK_DIR/client-cache" \
+  --file-api-url "$FILE_API_URL" \
+  --file-api-token "$FILE_API_TOKEN"
+
+cmp "$WORK_DIR/app-source/hello.txt" "$WORK_DIR/app-output/app-source/hello.txt"
+
+echo "file-api + minio + zenoh agent transfer ok"

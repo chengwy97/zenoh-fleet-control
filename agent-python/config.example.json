@@ -7,5 +7,7 @@
   "name": "local-agent",
   "connect": "tcp/127.0.0.1:7447",
   "transfer_backend": "local_spool",
-  "transfer_store": "/home/eame/cwy/zenoh/zenoh-fleet-control/.zfc/transfers"
+  "transfer_store": "/home/eame/cwy/zenoh/zenoh-fleet-control/.zfc/transfers",
+  "file_api_url": "http://127.0.0.1:8080",
+  "file_api_token": "dev-token-change-me"
 }

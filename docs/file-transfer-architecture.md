@@ -86,10 +86,27 @@ created -> uploading -> uploaded -> queued -> processing -> completed
 
 ## 后端演进
 
-当前 Python 原型保留 `local_spool`，用于单机协议验证。生产后端使用 `s3`/`minio`：
+当前 Python 原型同时支持 `local_spool` 和基于 `zfc-file-api` 的 `s3`/`minio` 后端：
 
 - `local_spool`：同机共享路径，不适用于真实手机。
-- `s3`/`minio`：跨设备、云端和多用户部署。
+- `s3`/`minio`：跨设备、云端和多用户部署。agent 和开发 CLI 通过 file-api 获取短期 URL，不直接保存 MinIO 密钥。
 - `tus`：如果需要专门的断点续传上传，可作为 file-api 的上传实现，但不改变 Zenoh 命令语义。
 
 App 和 Agent 应依赖抽象的 `TransferRef`，不要依赖具体存储 URL 格式。
+
+## 当前实现状态
+
+`agent-python` 已实现 file-api 传输后端：
+
+- `stage_upload`：本地文件或目录打包为 zip，向 file-api 申请上传 URL，PUT 到 MinIO，返回去掉 `upload_url` 的 `TransferRef`。
+- `import_to_cwd`：根据 `TransferRef.download_url` 下载 zip，校验 `size/sha256`，安全解压到当前 cwd 下的目标目录。
+- `export_from_cwd`：agent 打包 cwd 内文件或目录，上传到 MinIO，并通过 Zenoh 回传 `transfer_export_ready`。
+- `materialize`：App/开发 CLI 根据 `TransferRef` 下载并解包到本地输出目录。
+
+本地闭环验证脚本：
+
+```bash
+./scripts/verify-file-api-minio.sh
+```
+
+该脚本会启动 MinIO、file-api、zenohd 和 Python agent，验证 app 侧上传到 agent cwd、agent 侧导出回 app 侧并比较文件内容。

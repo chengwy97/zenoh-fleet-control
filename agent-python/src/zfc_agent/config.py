@@ -18,6 +18,8 @@ class AgentConfig:
     connect: str | None
     transfer_backend: str
     transfer_store: Path
+    file_api_url: str | None
+    file_api_token: str | None
 
     @classmethod
     def from_args(cls, args) -> "AgentConfig":
@@ -44,4 +46,6 @@ class AgentConfig:
             connect=args.connect or file_cfg.get("connect") or os.getenv("ZFC_CONNECT"),
             transfer_backend=getattr(args, "transfer_backend", None) or file_cfg.get("transfer_backend") or os.getenv("ZFC_TRANSFER_BACKEND", "local_spool"),
             transfer_store=transfer_store,
+            file_api_url=getattr(args, "file_api_url", None) or file_cfg.get("file_api_url") or os.getenv("ZFC_FILE_API_URL"),
+            file_api_token=getattr(args, "file_api_token", None) or file_cfg.get("file_api_token") or os.getenv("ZFC_FILE_API_TOKEN"),
         )

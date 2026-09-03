@@ -53,7 +53,15 @@ class Agent:
         self.seq_lock = threading.Lock()
         self.store = SessionStore(cfg.cwd / ".zfc" / "sessions")
         self.media_store = MediaStore(cfg.cwd / ".zfc" / "media")
-        self.transfer_backend = backend_from_config(cfg.transfer_backend, cfg.transfer_store)
+        self.transfer_backend = backend_from_config(
+            cfg.transfer_backend,
+            cfg.transfer_store,
+            username=cfg.username,
+            device_id=cfg.device_id,
+            session_id=cfg.session_id,
+            file_api_url=cfg.file_api_url,
+            file_api_token=cfg.file_api_token,
+        )
         self.pending_manifests: dict[str, MediaManifest] = {}
         self.persisted_session = self.store.load(cfg.session_id, cfg.cwd)
         self.worker = threading.Thread(target=self._worker_loop, name="zfc-agent-worker", daemon=True)
@@ -411,7 +419,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--name")
     parser.add_argument("--config", help="JSON config file with root, cwd, username, device_id, session_id, name, connect, and transfer settings")
     parser.add_argument("--transfer-backend", choices=["local_spool", "tus", "s3", "minio"])
-    parser.add_argument("--transfer-store", help="local spool directory for the local_spool transfer backend")
+    parser.add_argument("--transfer-store", help="local cache/spool directory for transfer backends")
+    parser.add_argument("--file-api-url", help="zfc-file-api base URL for s3/minio transfer backend")
+    parser.add_argument("--file-api-token", help="Bearer token for zfc-file-api")
     parser.add_argument("--connect", help="Zenoh router endpoint, e.g. tcp/127.0.0.1:7447")
     return parser
 
