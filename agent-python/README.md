@@ -83,11 +83,19 @@ Not implemented yet:
 
 ## Real media upload
 
-The mobile app should upload the actual binary bytes, not a phone-local path. During local validation:
+The mobile app should upload the actual binary bytes, not a phone-local path. In the chat UI this still behaves as an attachment: users attach an image/video/file and add a description; the app and agent hide the storage location details.
 
 ```bash
 zfc-send-media --username eame --device-id dev_media --session-id sess_media \
   --path /path/to/image.png --description "检查这张截图的布局"
+```
+
+For real phone-style transfer through file-api/MinIO:
+
+```bash
+zfc-send-media --username eame --device-id dev_media --session-id sess_media \
+  --path /path/to/image.png --description "检查这张截图的布局" \
+  --transfer-backend s3 --file-api-url http://127.0.0.1:8080 --file-api-token dev-token-change-me
 ```
 
 Use the returned `asset_id` in an AI command:
@@ -97,7 +105,7 @@ zfc-send-command --username eame --device-id dev_media --session-id sess_media \
   --tool codex --prompt "分析图片" --media "<asset_id>=关注布局和按钮"
 ```
 
-The agent validates media size and SHA-256 before saving it under `.zfc/media`. The Codex adapter passes images as image inputs. Video files are handled by an agent-side preprocessing policy; the prototype extracts up to three frames when `ffmpeg` is available. Audio is explicitly rejected until a transcription adapter is added.
+The agent validates media size and SHA-256 before saving it under `.zfc/media`. With `s3`/`minio`, Zenoh carries only the manifest and `TransferRef`; the binary payload is downloaded by the agent in the background. The Codex adapter passes images as image inputs. Video files are handled by an agent-side preprocessing policy; the prototype extracts up to three frames when `ffmpeg` is available. Audio and ordinary files are passed to the selected agent as validated local paths with the user description; the agent/tool decides whether to transcribe, inspect, convert, or otherwise process them.
 
 Configuration example: [config.example.json](config.example.json)
 

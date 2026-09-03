@@ -110,3 +110,10 @@ App 和 Agent 应依赖抽象的 `TransferRef`，不要依赖具体存储 URL �
 ```
 
 该脚本会启动 MinIO、file-api、zenohd 和 Python agent，验证 app 侧上传到 agent cwd、agent 侧导出回 app 侧并比较文件内容。
+
+
+## Chat Attachments
+
+聊天中的图片、视频、音频和普通文件也使用同一套 file-api/MinIO 数据面。用户界面不暴露 bucket、object key 或上传位置，只呈现附件、文件名、缩略图和描述。
+
+App 上传附件后发送 media manifest，manifest 内包含 `TransferRef`。Agent 下载并校验附件，落到自己的 `.zfc/media/<asset_id>/` 缓存目录。后续 `run_ai.media[]` 只引用 `asset_id`，由 agent 决定如何把图片、视频帧、音频转写或普通文件路径提供给具体 AI 工具。

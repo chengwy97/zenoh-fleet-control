@@ -106,3 +106,8 @@ agent 不应该让前端猜能力，而应上报：
 ```
 
 前端根据 capabilities 决定是否显示继续会话、approval、slash command 等按钮。
+
+
+## Chat Attachments
+
+For chat attachments, the agent resolves each `asset_id` to a validated local path before invoking the selected tool. Images are passed as native image inputs when the tool supports them. Videos may be sampled into frames while the original video path remains available. Audio and ordinary files are passed as paths with the user's description so the tool can decide whether to transcribe, inspect, convert, or use another local command.

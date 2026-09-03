@@ -28,35 +28,37 @@ class CodexExecAdapter:
 
         media = payload.get("media") or []
         image_args: list[str] = []
-        video_notes: list[str] = []
+        attachment_notes: list[str] = []
         for item in media:
             media_type = item.get("media_type", "")
             path = item.get("local_path") or item.get("path")
             if not path:
                 continue
+            description = item.get("description") or "no additional instruction"
             if media_type.startswith("image/"):
                 image_args.extend(["-i", path])
+                attachment_notes.append(f"[image] path={path}; instruction={description}")
             elif media_type.startswith("video/"):
                 frames, error = await self.extract_video_frames(Path(path), context.cwd, item.get("asset_id", "video"))
                 if error:
-                    yield ToolEvent("error", {"code": "video_preprocess_failed", "message": error, "retryable": False})
+                    attachment_notes.append(f"[video] path={path}; frame_extraction=failed ({error}); instruction={description}")
                 else:
                     for frame in frames:
                         image_args.extend(["-i", str(frame)])
-                    video_notes.append(f"[video:{Path(path).name}; extracted_frames={len(frames)}] {item.get('description') or ''}".strip())
+                    attachment_notes.append(f"[video] path={path}; extracted_frames={len(frames)}; instruction={description}")
             elif media_type.startswith("audio/"):
-                yield ToolEvent("error", {"code": "audio_not_supported", "message": "Codex adapter has no audio transcription adapter yet", "retryable": False})
+                attachment_notes.append(f"[audio] path={path}; transcription_or_other_processing_is_agent_decision=true; instruction={description}")
             else:
-                yield ToolEvent("error", {"code": "unsupported_media", "message": f"unsupported media type for codex: {media_type}", "retryable": False})
+                attachment_notes.append(f"[file] media_type={media_type}; path={path}; inspect_or_process_as_needed=true; instruction={description}")
 
         full_prompt = prompt
-        if video_notes:
-            full_prompt = prompt + "\n\nVideo notes:\n" + "\n".join(video_notes)
+        if attachment_notes:
+            full_prompt = prompt + "\n\nAttachments available on the agent filesystem:\n" + "\n".join(attachment_notes)
 
         if context.native_session_id:
-            args = ["codex", "-a", "never", "exec", "resume", "--json"] + image_args + [context.native_session_id, full_prompt]
+            args = ["codex", "-a", "never", "exec", "resume", "--json", "--skip-git-repo-check"] + image_args + [context.native_session_id, full_prompt]
         else:
-            args = ["codex", "-a", "never", "exec", "--json"] + image_args + [
+            args = ["codex", "-a", "never", "exec", "--json", "--skip-git-repo-check"] + image_args + [
                 "--cd", str(context.cwd), "--sandbox", sandbox, full_prompt,
             ]
 

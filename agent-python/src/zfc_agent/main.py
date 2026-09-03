@@ -198,8 +198,11 @@ class Agent:
         try:
             manifest_data = from_payload(sample.payload)
             manifest = MediaManifest(**manifest_data)
-            self.pending_manifests[manifest.asset_id] = manifest
-            self._try_finalize_media(manifest)
+            if manifest.transfer:
+                self._materialize_media_transfer(manifest)
+            else:
+                self.pending_manifests[manifest.asset_id] = manifest
+                self._try_finalize_media(manifest)
         except Exception as exc:
             print(f"invalid media manifest: {exc}")
 
@@ -218,7 +221,28 @@ class Agent:
             self.publish_event(manifest.asset_id, "error", {"code": "media_finalize_failed", "message": str(exc), "retryable": False})
             return
         self.pending_manifests.pop(manifest.asset_id, None)
-        self.publish_event(manifest.asset_id, "media_ref", {"asset_id": manifest.asset_id, "name": manifest.name, "media_type": manifest.media_type, "description": manifest.description})
+        self._publish_media_ready(manifest)
+
+    def _materialize_media_transfer(self, manifest: MediaManifest) -> None:
+        try:
+            if not manifest.transfer:
+                raise ValueError("media transfer ref is missing")
+            ref = ref_from_dict(manifest.transfer)
+            asset_dir = self.media_store.root / manifest.asset_id
+            extracted_root = self.transfer_backend.import_to_cwd(ref, asset_dir, ".", asset_dir)
+            self.media_store.finalize_materialized(manifest, extracted_root)
+            self._publish_media_ready(manifest)
+        except Exception as exc:
+            self.publish_event(manifest.asset_id, "error", {"code": "media_transfer_failed", "message": str(exc), "retryable": True})
+
+    def _publish_media_ready(self, manifest: MediaManifest) -> None:
+        self.publish_event(manifest.asset_id, "media_ref", {
+            "asset_id": manifest.asset_id,
+            "name": manifest.name,
+            "media_type": manifest.media_type,
+            "description": manifest.description,
+            "transport": "transfer" if manifest.transfer else "zenoh_chunks",
+        })
 
     def _worker_loop(self) -> None:
         while True:

@@ -199,11 +199,9 @@ Agent 返回：
 上传流程：
 
 1. App 为媒体生成 `asset_id`。
-2. App 按固定大小发送二进制 chunk：
-   `.../media/<asset_id>/chunks/<index>`。
-3. App 发送 manifest：
-   `.../media/<asset_id>/manifest`。
-4. Agent 收齐 chunk 后校验 `size` 和 `sha256`，再写入本地媒体缓存。
+2. 真实手机和跨设备场景下，App 先通过 file-api/MinIO 上传真实字节，拿到 `TransferRef`。本地验证也可以继续使用 Zenoh chunk。
+3. App 发送 manifest 到 `.../media/<asset_id>/manifest`，manifest 可携带 `transfer` 引用。
+4. Agent 根据 manifest 拉取或拼装真实文件，校验原始文件 `size` 和 `sha256`，再写入本地媒体缓存。
 5. `run_ai` 只引用 `asset_id`，并携带本轮用户描述。
 6. Agent 根据工具能力解析 asset：图片可作为 Codex 图片输入；视频由 agent 决定是否抽帧；音频由对应转写 adapter 处理。
 
@@ -224,6 +222,37 @@ Agent 返回：
 ```
 
 App 不应发送 `local_path`。agent 自己通过 `asset_id` 查找已校验的本地文件。
+
+使用 file-api/MinIO 的媒体 manifest 示例：
+
+```json
+{
+  "version": "v1",
+  "username": "eame",
+  "device_id": "dev_001",
+  "session_id": "sess_001",
+  "asset_id": "asset_001",
+  "name": "screenshot.png",
+  "media_type": "image/png",
+  "size": 123456,
+  "sha256": "raw-file-sha256",
+  "chunk_count": 0,
+  "transfer": {
+    "version": "v1",
+    "transfer_id": "transfer_001",
+    "backend": "s3",
+    "uri": "s3://zfc-transfers/.../screenshot.png",
+    "name": "screenshot.png",
+    "archive": "zip",
+    "size": 654321,
+    "sha256": "zip-sha256"
+  },
+  "description": "检查这个截图中的错误提示",
+  "created_at": 1725330000
+}
+```
+
+聊天 UI 不需要展示 `TransferRef`、bucket 或 object key。用户只看到附件和描述，底层传输由 App/agent 自动完成。
 
 ## File transfer
 

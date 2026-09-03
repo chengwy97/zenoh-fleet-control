@@ -76,3 +76,11 @@ Run the local end-to-end check after Docker and Python dependencies are availabl
 ```
 
 It starts MinIO, zfc-file-api, zenohd, and a Python agent, then verifies S3-backed import/export through Zenoh commands.
+
+For a full chat-attachment simulation with a PDF and Codex running from a normal user directory:
+
+```bash
+PDF_PATH=/path/to/book.pdf ./scripts/verify-chat-attachment-pdf.sh
+```
+
+The script intentionally rejects root execution and defaults the agent cwd to `/home/eame/Downloads` to cover non-Git working directories.

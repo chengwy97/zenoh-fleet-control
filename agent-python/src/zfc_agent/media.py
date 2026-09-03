@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +23,13 @@ class MediaManifest:
     media_type: str
     size: int
     sha256: str
-    chunk_count: int
+    chunk_count: int = 0
+    transfer: dict[str, Any] | None = None
     description: str | None = None
     created_at: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {key: value for key, value in asdict(self).items() if value is not None}
 
 
 class MediaStore:
@@ -61,16 +65,30 @@ class MediaStore:
                     output.write(data)
                     digest.update(data)
                     written += len(data)
-            if written != manifest.size:
-                target.unlink(missing_ok=True)
-                raise ValueError("media size mismatch")
-            if digest.hexdigest() != manifest.sha256:
-                target.unlink(missing_ok=True)
-                raise ValueError("media checksum mismatch")
-            (asset_dir / "manifest.json").write_text(json.dumps(manifest.__dict__, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            self._verify_payload(manifest, target, written, digest.hexdigest())
+            self._write_manifest(asset_dir, manifest)
             for chunk in chunks_dir.glob("*.part"):
                 chunk.unlink()
             chunks_dir.rmdir()
+            return target
+
+    def finalize_materialized(self, manifest: MediaManifest, extracted_root: Path) -> Path:
+        self._validate_asset_id(manifest.asset_id)
+        source = extracted_root / self._safe_name(manifest.name)
+        if not source.exists() or not source.is_file():
+            candidates = [path for path in extracted_root.rglob("*") if path.is_file()]
+            if len(candidates) != 1:
+                raise FileNotFoundError(f"media payload is missing after transfer extraction: {manifest.name}")
+            source = candidates[0]
+        with self._lock:
+            asset_dir = self._asset_dir(manifest.asset_id)
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            target = asset_dir / self._safe_name(manifest.name)
+            if source.resolve() != target.resolve():
+                target.write_bytes(source.read_bytes())
+            data = target.read_bytes()
+            self._verify_payload(manifest, target, len(data), hashlib.sha256(data).hexdigest())
+            self._write_manifest(asset_dir, manifest)
             return target
 
     def resolve(self, asset_id: str) -> tuple[MediaManifest, Path]:
@@ -88,6 +106,18 @@ class MediaStore:
 
     def _asset_dir(self, asset_id: str) -> Path:
         return self.root / asset_id
+
+    def _write_manifest(self, asset_dir: Path, manifest: MediaManifest) -> None:
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        (asset_dir / "manifest.json").write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def _verify_payload(self, manifest: MediaManifest, target: Path, written: int, digest: str) -> None:
+        if written != manifest.size:
+            target.unlink(missing_ok=True)
+            raise ValueError("media size mismatch")
+        if digest != manifest.sha256:
+            target.unlink(missing_ok=True)
+            raise ValueError("media checksum mismatch")
 
     @staticmethod
     def _safe_name(name: str) -> str:

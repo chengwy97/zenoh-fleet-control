@@ -111,4 +111,20 @@ cmp "$WORK_DIR/app-source/hello.txt" "$WORK_DIR/agent-root/app-source/hello.txt"
 
 cmp "$WORK_DIR/app-source/hello.txt" "$WORK_DIR/app-output/app-source/hello.txt"
 
+printf 'chat attachment through minio\n' >"$WORK_DIR/chat-attachment.txt"
+ASSET_ID=$(.venv/bin/zfc-send-media \
+  --username eame \
+  --device-id dev_minio \
+  --session-id sess_minio \
+  --path "$WORK_DIR/chat-attachment.txt" \
+  --description "Use this attachment in the next chat turn" \
+  --connect "$ZENOH_CONNECT" \
+  --transfer-backend s3 \
+  --transfer-store "$WORK_DIR/client-cache" \
+  --file-api-url "$FILE_API_URL" \
+  --file-api-token "$FILE_API_TOKEN")
+sleep 2
+test -f "$WORK_DIR/agent-root/.zfc/media/$ASSET_ID/chat-attachment.txt"
+cmp "$WORK_DIR/chat-attachment.txt" "$WORK_DIR/agent-root/.zfc/media/$ASSET_ID/chat-attachment.txt"
+
 echo "file-api + minio + zenoh agent transfer ok"
