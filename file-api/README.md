@@ -20,6 +20,8 @@ export ZFC_S3_ENDPOINT=http://127.0.0.1:9000
 export ZFC_S3_ACCESS_KEY=zfcadmin
 export ZFC_S3_SECRET_KEY=zfcadmin123
 export ZFC_S3_BUCKET=zfc-transfers
+export ZFC_FILE_USER_TOKENS='{"eame":"user-token-eame"}'
+export ZFC_FILE_DEVICE_TOKENS='{"eame/dev1":"device-token-dev1"}'
 export ZFC_FILE_AUTH_TOKEN=dev-token-change-me
 ```
 
@@ -36,6 +38,8 @@ curl -H 'Authorization: Bearer dev-token-change-me' \
   -H 'Content-Type: application/json' \
   -d '{"username":"eame","device_id":"dev1","session_id":"sess1","name":"payload.zip","archive":"zip"}' \
   http://127.0.0.1:8080/v1/transfers/uploads
+
+For scoped tokens, use either `Bearer user-token-eame` for all `eame` requests or `Bearer device-token-dev1` for the exact `eame/dev1` device scope.
 ```
 
 ## Verified locally

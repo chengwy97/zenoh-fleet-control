@@ -17,6 +17,8 @@ zenoh-fleet-control/
 ├── protocol/
 ├── agent-python/
 ├── app-android/
+├── web/
+├── bridge-api/
 ├── router/
 ├── examples/
 ├── scripts/
@@ -105,6 +107,33 @@ agent-python/
 - 媒体发送和查看
 
 验证阶段可以先放设计文档，后续再创建 Android Studio 工程。
+
+### `bridge-api/`
+
+放给手机 App 和浏览器用的 HTTPS 入口层。
+
+职责：
+
+- 用户名密码登录
+- bearer token 颁发
+- 设备列表和会话状态查询
+- 命令和控制消息下发
+- 跟 Zenoh 做后端桥接
+- 对外统一 HTTPS，便于后续浏览器复用
+
+### `web/`
+
+放浏览器控制台静态资源。
+
+职责：
+
+- 登录 bridge
+- 设备和 session 切换
+- 通过 bridge 发送 Codex / shell 命令
+- 轮询 session events/results
+- 浏览 agent 工作目录
+
+浏览器端不直接连接 Zenoh，由 `bridge-api` 同源托管。
 
 ### `router/`
 

@@ -7,6 +7,7 @@
 ## 目标
 
 - 手机 App 作为统一控制台
+- 浏览器作为同源 HTTPS 控制台
 - 多终端在线状态管理
 - 会话切换和工作目录切换
 - 命令下发与执行反馈
@@ -31,9 +32,26 @@
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
+- [docs/development-versions.md](docs/development-versions.md)
 - [docs/deployment.md](docs/deployment.md)
 - [file-api/README.md](file-api/README.md)
 - [docs/file-transfer-architecture.md](docs/file-transfer-architecture.md)
+
+## 快速验证入口
+
+本地完整模拟栈可以用脚本启动：
+
+```bash
+./scripts/start-android-sim-backend.sh
+```
+
+启动后：
+
+- Android 模拟器使用 `https://10.0.2.2:8443`
+- 本机浏览器使用 `https://127.0.0.1:8443/`
+- 真机使用 `https://<部署机器局域网 IP>:8443`，并需要手动导入脚本生成的 CA
+
+浏览器控制台由 `zfc-bridge-api` 同源托管；手机 App 和浏览器都只接 HTTPS bridge，不直接接 Zenoh。
 
 ## 语言选型
 
@@ -58,6 +76,28 @@
 - 先以 Python 打通协议和功能验证
 - 协议层保持和实现语言解耦
 - 后续可无痛替换 agent 实现语言
+
+## 访问层架构
+
+手机 App 和浏览器客户端不直接依赖 Zenoh。推荐的对外接入方式是：
+
+- `App / Browser -> HTTPS bridge -> Zenoh -> Agent`
+
+这样可以把账号密码、TLS 证书导入、会话管理和 UI 适配放在 HTTP 层，同时保留 Zenoh 作为内部事件总线和多终端控制面。
+
+### 为什么要加桥接层
+
+- Android 和浏览器都更容易接 HTTPs
+- 私有 CA 证书可以手动导入，不依赖系统自动识别
+- 后续可以同时给手机 App 和网页端复用同一套接口
+- Zenoh 继续负责状态广播、命令分发、事件流和回放
+
+### 对外协议
+
+- 登录、设备列表、会话状态、目录查询、命令下发、控制消息都走 HTTPS
+- 浏览器控制台由 `zfc-bridge-api` 直接托管，避免浏览器直接接 Zenoh
+- 终端 agent 继续只连 Zenoh
+- 文件上传仍然走 `zfc-file-api + MinIO`，桥接层只处理会话控制面
 
 ## 云端安全模型
 
@@ -246,6 +286,15 @@ agent 侧应该提供统一的 `Tool Adapter`，把不同工具的输入输出�
 - 离线消息缓存
 - command/result 持久化
 - 媒体元数据与引用
+
+### 5. File Data Plane
+
+负责：
+
+- 通过 `zfc-file-api` 鉴权
+- 通过 MinIO/S3 存储真实文件字节
+- 给 App 和 Agent 生成短期上传/下载 URL
+- 只在 Zenoh 控制面传递 `TransferRef`
 
 ## 核心对象
 

@@ -13,3 +13,8 @@ venv/
 # Local runtime data
 *.log
 .zfc/
+
+# Android local state
+app-android/.gradle/
+app-android/local.properties
+app-android/**/build/

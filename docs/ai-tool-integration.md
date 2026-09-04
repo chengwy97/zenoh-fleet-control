@@ -86,9 +86,14 @@ codex -a never exec --json --cd <cwd> --sandbox workspace-write <prompt>
 
 ## Claude 能力边界
 
-Claude Code 后续建议使用非交互 print/JSON 模式接入。
+Claude Code 现在按非交互 JSON 模式接入，优先使用本机 `claude` CLI。
 
-暂不在第一阶段实现真实 Claude 调用，原因是需要单独确认本机 CLI、认证状态、输出格式和权限模式。
+当前策略：
+
+- 优先走 `claude -p <prompt> --output-format json`
+- `native_session_id` 存在时使用 `--resume`
+- 只有 CLI 可用时才启用该适配器
+- 仍不假设所有交互式 TUI slash command 都可用
 
 ## Capability 上报
 

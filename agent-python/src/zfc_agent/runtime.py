@@ -18,3 +18,7 @@ class SessionRuntime:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     pending: deque[PendingMessage] = field(default_factory=deque)
     ending: bool = False
+    approval_event: threading.Event = field(default_factory=threading.Event)
+    approval_cmd_id: str | None = None
+    approval_id: str | None = None
+    approval_decision: str | None = None

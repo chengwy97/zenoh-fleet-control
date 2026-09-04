@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zfc-bridge-api"
+version = "0.1.0"
+description = "HTTPS bridge for zenoh-fleet-control mobile and browser clients"
+requires-python = ">=3.10"
+dependencies = [
+    "eclipse-zenoh>=1.0.0",
+    "fastapi>=0.110",
+    "httpx2",
+    "uvicorn>=0.27",
+]
+
+[project.scripts]
+zfc-bridge-api = "zfc_bridge.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

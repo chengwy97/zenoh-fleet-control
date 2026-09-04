@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Zenoh Fleet Control</string>
+    <string name="bridge_base_url">https://10.0.2.2:8443</string>
+</resources>

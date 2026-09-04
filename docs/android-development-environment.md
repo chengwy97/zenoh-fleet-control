@@ -4,13 +4,20 @@ The next milestone is to make `app-android` runnable before building the full mo
 
 ## Target stack
 
-- Language: Kotlin
+- Java runtime used during verification: OpenJDK 21.0.11
+- Python runtime used during verification: 3.13.13
+- Language: Kotlin 2.0.20
 - UI: Jetpack Compose + Material 3
-- Build: Gradle wrapper committed in `app-android`
-- Minimum Android version: decide during scaffold, likely API 26+
+- Build: Gradle 8.13 wrapper committed in `app-android`
+- Android Gradle Plugin: 8.13.0
+- Kotlin Android plugin: 2.0.20
+- Compose BOM: 2025.12.00
+- Minimum Android version: API 26+
+- Compile / target SDK: Android 36
 - Local backend during simulation:
   - `zenohd` on the Linux host
   - `zfc-file-api` on the Linux host
+  - `zfc-bridge-api` on the Linux host for Android/browser access
   - MinIO on the Linux host through Docker Compose
   - Python agent on the Linux host
 
@@ -25,6 +32,8 @@ ANDROID_HOME: not configured
 adb: not installed in PATH
 emulator: not installed in PATH
 ```
+
+For reproducibility, keep the verified stack aligned with [development-versions.md](development-versions.md).
 
 This is enough to start documenting and checking prerequisites, but not enough to run an Android app yet.
 
@@ -52,18 +61,21 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/c
 Android emulator cannot access Linux host `127.0.0.1` directly. Use:
 
 ```text
+https://10.0.2.2:8443   -> host zfc-bridge-api
 http://10.0.2.2:8080    -> host zfc-file-api
 http://10.0.2.2:9000    -> host MinIO API, only for presigned URLs in local simulation
-tcp/10.0.2.2:7447      -> host zenohd, if Android Zenoh client can dial TCP directly
 ```
 
-If native Android Zenoh integration blocks the MVP, add a temporary host bridge:
+The app defaults to `https://10.0.2.2:8443`, but the Bridge URL can be changed
+in the app for a real phone using a reachable HTTPS IP or domain. No APK
+rebuild is needed.
 
-```text
-Android App <-> WebSocket/HTTP bridge <-> Zenoh
-```
+For a real phone, start the backend with `ZFC_BRIDGE_IP=<host-lan-ip>` so the
+temporary bridge certificate contains the same IP that the phone uses.
 
-The bridge should be treated as an MVP adapter, not the final protocol.
+The Android app should talk to `zfc-bridge-api` over HTTPS. The bridge talks to Zenoh on the host side.
+
+For private PKI, install the issuing CA certificate into the Android device or emulator manually. Do not assume the phone can auto-discover the public key or trust chain.
 
 ## Local backend for app simulation
 
@@ -85,5 +97,7 @@ The Android simulation launcher starts the same services and keeps them running 
 - `./scripts/check-android-env.sh` reports Java, Android SDK, `adb`, and `emulator` available.
 - A test emulator can boot.
 - The emulator can reach `http://10.0.2.2:8080/healthz` when file-api is running.
+- The emulator can reach `https://10.0.2.2:8443/healthz` after importing the generated bridge CA.
 - `app-android` can build from the command line.
 - `app-android` can install and launch on the emulator.
+- `zfc-bridge-api` can serve HTTPS and accept username/password login.

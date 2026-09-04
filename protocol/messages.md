@@ -192,6 +192,12 @@ Agent 返回：
 - `media_ref`
 - `error`
 
+`progress` 事件建议用于：
+
+- transfer 的 `archive_started` / `archive_progress` / `archive_completed`
+- transfer 的 `download_started` / `extract_started` / `extract_progress` / `extract_completed`
+- 其他耗时任务的阶段性进度回报
+
 ## Media upload and AI attachment
 
 手机发送的图片、音频、视频必须传输真实二进制内容，不能把手机本地路径直接发送给 agent。
@@ -427,12 +433,39 @@ A ZFC `session_id` is the stable outer session. The agent stores one native sess
   "type": "approval_response",
   "payload": {
     "approval_id": "apv_001",
+    "cmd_id": "cmd_001",
     "approved": true,
     "comment": "ok"
   },
   "timestamp": 1725330008
 }
 ```
+
+## HTTP bridge event read model
+
+手机和浏览器不直接订阅 Zenoh。bridge 将 agent 的状态、事件和结果暂存在缓存中，客户端
+通过以下接口轮询，并使用 `after_seq` 在断线后继续获取事件：
+
+```text
+GET /v1/sessions/{username}/{device_id}/{session_id}/events?after_seq=0
+Authorization: Bearer <token>
+```
+
+返回结构：
+
+```json
+{
+  "username": "eame",
+  "device_id": "dev_001",
+  "session_id": "sess_001",
+  "items": [],
+  "results": {}
+}
+```
+
+原型 bridge 最多保留每个 session 最近 1000 个事件；生产环境应替换为持久化事件存储或
+支持回放的消息存储。HTTP bridge 的 URL 参数和 JSON body 中的用户、设备、会话标识必须
+完全一致，防止跨命名空间转发。
 
 ## MediaRef
 

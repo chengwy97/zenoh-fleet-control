@@ -8,6 +8,7 @@ import uuid
 import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -41,16 +42,16 @@ class TransferRef:
 class TransferBackend:
     name = "base"
 
-    def stage_upload(self, source: Path) -> TransferRef:
+    def stage_upload(self, source: Path, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         raise NotImplementedError
 
-    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None) -> Path:
+    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> Path:
         raise NotImplementedError
 
-    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None) -> TransferRef:
+    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         raise NotImplementedError
 
-    def materialize(self, ref: TransferRef, output_dir: Path) -> Path:
+    def materialize(self, ref: TransferRef, output_dir: Path, progress: Callable[[str, dict], None] | None = None) -> Path:
         raise NotImplementedError
 
 
@@ -61,36 +62,46 @@ class LocalSpoolTransferBackend(TransferBackend):
         self.root = root.expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def stage_upload(self, source: Path) -> TransferRef:
+    def stage_upload(self, source: Path, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         source = source.expanduser().resolve()
         if not source.exists():
             raise FileNotFoundError(f"source does not exist: {source}")
         transfer_id = f"transfer_{uuid.uuid4().hex}"
         archive = self.root / f"{transfer_id}.zip"
-        zip_path(source, archive)
+        emit_progress(progress, "archive_started", {"transfer_id": transfer_id, "path": str(source)})
+        zip_path(source, archive, progress=progress, transfer_id=transfer_id)
+        emit_progress(progress, "archive_completed", {"transfer_id": transfer_id, "bytes": archive.stat().st_size})
         return self._ref(transfer_id, archive, source.name)
 
-    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None) -> Path:
+    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> Path:
         archive = self._archive_path(ref)
+        emit_progress(progress, "download_started", {"transfer_id": ref.transfer_id, "bytes": ref.size})
         verify_archive(ref, archive)
+        emit_progress(progress, "extract_started", {"transfer_id": ref.transfer_id, "archive": str(archive)})
         destination = resolve_in_root(root or cwd, cwd, target_path or ".")
-        extract_zip_safely(archive, destination)
+        extract_zip_safely(archive, destination, progress=progress, transfer_id=ref.transfer_id)
+        emit_progress(progress, "extract_completed", {"transfer_id": ref.transfer_id, "destination": str(destination)})
         return destination
 
-    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None) -> TransferRef:
+    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         source = resolve_in_root(root or cwd, cwd, source_path or ".")
         if not source.exists():
             raise FileNotFoundError("export source does not exist")
         transfer_id = f"transfer_{uuid.uuid4().hex}"
         archive = self.root / f"{transfer_id}.zip"
-        zip_path(source, archive)
+        emit_progress(progress, "archive_started", {"transfer_id": transfer_id, "path": str(source)})
+        zip_path(source, archive, progress=progress, transfer_id=transfer_id)
+        emit_progress(progress, "archive_completed", {"transfer_id": transfer_id, "bytes": archive.stat().st_size})
         return self._ref(transfer_id, archive, source.name)
 
-    def materialize(self, ref: TransferRef, output_dir: Path) -> Path:
+    def materialize(self, ref: TransferRef, output_dir: Path, progress: Callable[[str, dict], None] | None = None) -> Path:
         archive = self._archive_path(ref)
+        emit_progress(progress, "download_started", {"transfer_id": ref.transfer_id, "bytes": ref.size})
         verify_archive(ref, archive)
+        emit_progress(progress, "extract_started", {"transfer_id": ref.transfer_id, "archive": str(archive)})
         output_dir = output_dir.expanduser().resolve()
-        extract_zip_safely(archive, output_dir)
+        extract_zip_safely(archive, output_dir, progress=progress, transfer_id=ref.transfer_id)
+        emit_progress(progress, "extract_completed", {"transfer_id": ref.transfer_id, "destination": str(output_dir)})
         return output_dir
 
     def _archive_path(self, ref: TransferRef) -> Path:
@@ -128,52 +139,68 @@ class FileApiTransferBackend(TransferBackend):
         self.device_id = device_id
         self.session_id = session_id
 
-    def stage_upload(self, source: Path) -> TransferRef:
+    def stage_upload(self, source: Path, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         source = source.expanduser().resolve()
         if not source.exists():
             raise FileNotFoundError(f"source does not exist: {source}")
         with tempfile.NamedTemporaryFile(prefix="zfc-upload-", suffix=".zip", dir=self.store, delete=False) as temp:
             archive = Path(temp.name)
         try:
-            zip_path(source, archive)
+            emit_progress(progress, "archive_started", {"path": str(source)})
+            zip_path(source, archive, progress=progress)
+            emit_progress(progress, "archive_completed", {"bytes": archive.stat().st_size})
+            emit_progress(progress, "upload_started", {"path": str(source)})
             ref = self._create_upload(source.name, archive)
+            emit_progress(progress, "upload_progress", {"stage": "presigned_put", "bytes": archive.stat().st_size, "total": archive.stat().st_size})
             self._put_bytes(ref.upload_url, archive.read_bytes())
+            emit_progress(progress, "upload_completed", {"transfer_id": ref.transfer_id, "bytes": archive.stat().st_size})
             return without_upload_url(ref)
         finally:
             archive.unlink(missing_ok=True)
 
-    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None) -> Path:
+    def import_to_cwd(self, ref: TransferRef, cwd: Path, target_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> Path:
         ref = self._refresh_download_url(ref)
+        emit_progress(progress, "download_started", {"transfer_id": ref.transfer_id})
         archive = self._download_archive(ref)
         try:
             verify_archive(ref, archive)
+            emit_progress(progress, "extract_started", {"transfer_id": ref.transfer_id, "archive": str(archive)})
             destination = resolve_in_root(root or cwd, cwd, target_path or ".")
-            extract_zip_safely(archive, destination)
+            extract_zip_safely(archive, destination, progress=progress, transfer_id=ref.transfer_id)
+            emit_progress(progress, "extract_completed", {"transfer_id": ref.transfer_id, "destination": str(destination)})
             return destination
         finally:
             archive.unlink(missing_ok=True)
 
-    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None) -> TransferRef:
+    def export_from_cwd(self, cwd: Path, source_path: str | None, root: Path | None = None, progress: Callable[[str, dict], None] | None = None) -> TransferRef:
         source = resolve_in_root(root or cwd, cwd, source_path or ".")
         if not source.exists():
             raise FileNotFoundError("export source does not exist")
         with tempfile.NamedTemporaryFile(prefix="zfc-export-", suffix=".zip", dir=self.store, delete=False) as temp:
             archive = Path(temp.name)
         try:
-            zip_path(source, archive)
+            emit_progress(progress, "archive_started", {"path": str(source)})
+            zip_path(source, archive, progress=progress)
+            emit_progress(progress, "archive_completed", {"bytes": archive.stat().st_size})
+            emit_progress(progress, "upload_started", {"path": str(source)})
             ref = self._create_upload(source.name, archive)
+            emit_progress(progress, "upload_progress", {"stage": "presigned_put", "bytes": archive.stat().st_size, "total": archive.stat().st_size})
             self._put_bytes(ref.upload_url, archive.read_bytes())
+            emit_progress(progress, "upload_completed", {"transfer_id": ref.transfer_id, "bytes": archive.stat().st_size})
             return without_upload_url(ref)
         finally:
             archive.unlink(missing_ok=True)
 
-    def materialize(self, ref: TransferRef, output_dir: Path) -> Path:
+    def materialize(self, ref: TransferRef, output_dir: Path, progress: Callable[[str, dict], None] | None = None) -> Path:
         ref = self._refresh_download_url(ref)
+        emit_progress(progress, "download_started", {"transfer_id": ref.transfer_id})
         archive = self._download_archive(ref)
         try:
             verify_archive(ref, archive)
+            emit_progress(progress, "extract_started", {"transfer_id": ref.transfer_id, "archive": str(archive)})
             output_dir = output_dir.expanduser().resolve()
-            extract_zip_safely(archive, output_dir)
+            extract_zip_safely(archive, output_dir, progress=progress, transfer_id=ref.transfer_id)
+            emit_progress(progress, "extract_completed", {"transfer_id": ref.transfer_id, "destination": str(output_dir)})
             return output_dir
         finally:
             archive.unlink(missing_ok=True)
@@ -257,25 +284,37 @@ def verify_archive(ref: TransferRef, archive: Path) -> None:
         raise ValueError("transfer archive checksum mismatch")
 
 
-def extract_zip_safely(archive: Path, destination: Path) -> None:
+def extract_zip_safely(archive: Path, destination: Path, progress: Callable[[str, dict], None] | None = None, transfer_id: str | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive) as zf:
-        for member in zf.infolist():
+        members = zf.infolist()
+        total = max(len(members), 1)
+        for index, member in enumerate(members, start=1):
             target = (destination / member.filename).resolve()
             if target != destination and destination not in target.parents:
                 raise ValueError("archive entry escapes destination")
+            emit_progress(progress, "extract_progress", {"transfer_id": transfer_id, "current": index, "total": total, "name": member.filename})
         zf.extractall(destination)
 
 
-def zip_path(source: Path, archive: Path) -> None:
+def zip_path(source: Path, archive: Path, progress: Callable[[str, dict], None] | None = None, transfer_id: str | None = None) -> None:
     archive.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
         if source.is_dir():
-            for path in sorted(source.rglob("*")):
+            files = [path for path in sorted(source.rglob("*")) if path.is_file()]
+            total = max(len(files), 1)
+            for index, path in enumerate(files, start=1):
                 if path.is_file():
                     zf.write(path, path.relative_to(source.parent))
+                emit_progress(progress, "archive_progress", {"transfer_id": transfer_id, "current": index, "total": total, "name": str(path)})
         else:
             zf.write(source, source.name)
+            emit_progress(progress, "archive_progress", {"transfer_id": transfer_id, "current": 1, "total": 1, "name": str(source)})
+
+
+def emit_progress(progress: Callable[[str, dict], None] | None, phase: str, content: dict) -> None:
+    if progress:
+        progress(phase, content)
 
 
 def backend_from_config(

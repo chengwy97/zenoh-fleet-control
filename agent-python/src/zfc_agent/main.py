@@ -19,7 +19,7 @@ from .filesystem import list_directory
 from .models import DeviceStatus, from_payload, now_ts, to_json
 from .runtime import PendingMessage, SessionRuntime
 from .sessions import LocalSession
-from .storage import SessionStore, ToolSession
+from .storage import PendingCommand, SessionStore, ToolSession
 from .transfer import backend_from_config, ref_from_dict
 from .zenoh_client import declare_queryable, open_session, put_bytes, put_json, subscribe
 
@@ -64,7 +64,15 @@ class Agent:
         )
         self.pending_manifests: dict[str, MediaManifest] = {}
         self.persisted_session = self.store.load(cfg.session_id, cfg.cwd)
+        for pending in self.persisted_session.pending_commands:
+            self.command_queue.put(pending.command)
         self.worker = threading.Thread(target=self._worker_loop, name="zfc-agent-worker", daemon=True)
+
+    def _persist_pending_commands(self) -> None:
+        self.persisted_session.pending_commands = [
+            PendingCommand(command=item.command, queued_at=now_ts()) for item in self.runtime.pending
+        ]
+        self.store.save(self.persisted_session)
 
     def publish_status(self) -> None:
         device_status = "busy" if self.runtime.running_cmd_id else "online"
@@ -106,6 +114,11 @@ class Agent:
             "completed_at": now_ts(),
         }))
 
+    def publish_transfer_progress(self, cmd_id: str, phase: str, content: dict) -> None:
+        payload = dict(content)
+        payload.setdefault("phase", phase)
+        self.publish_event(cmd_id, "progress", payload)
+
     def on_command(self, sample) -> None:
         try:
             command = from_payload(sample.payload)
@@ -126,6 +139,7 @@ class Agent:
                 return
             if self.runtime.running_cmd_id and command.get("type") == "run_ai":
                 self.runtime.pending.append(PendingMessage(command))
+                self._persist_pending_commands()
                 self.publish_event(cmd_id, "accepted", {"type": "run_ai", "queued": True})
                 self.publish_event(cmd_id, "message", {"text": "message queued until current task completes"})
                 return
@@ -175,8 +189,24 @@ class Agent:
                 self.publish_event(cmd_id, "message", {"text": "cancellation requested"})
             return
         if control_type == "approval_response":
-            if cmd_id:
-                self.publish_event(cmd_id, "error", {"code": "approval_not_supported", "message": "approval forwarding is not implemented in the Codex exec adapter", "retryable": False})
+            control_payload = control.get("payload")
+            if not isinstance(control_payload, dict):
+                control_payload = {}
+            approval_id = control_payload.get("approval_id") or control.get("approval_id")
+            decision = control_payload.get("decision") or control.get("decision")
+            response_cmd_id = control.get("cmd_id")
+            with self.runtime.lock:
+                if (
+                    approval_id
+                    and decision
+                    and approval_id == self.runtime.approval_id
+                    and (not response_cmd_id or response_cmd_id == self.runtime.approval_cmd_id)
+                ):
+                    self.runtime.approval_decision = decision
+                    self.runtime.approval_event.set()
+            event_cmd_id = self.runtime.approval_cmd_id or cmd_id
+            if event_cmd_id:
+                self.publish_event(event_cmd_id, "approval_result", {"approval_id": approval_id, "decision": decision})
             return
         if cmd_id:
             self.publish_event(cmd_id, "error", {"code": "unsupported_control", "message": str(control_type), "retryable": False})
@@ -229,7 +259,17 @@ class Agent:
                 raise ValueError("media transfer ref is missing")
             ref = ref_from_dict(manifest.transfer)
             asset_dir = self.media_store.root / manifest.asset_id
-            extracted_root = self.transfer_backend.import_to_cwd(ref, asset_dir, ".", asset_dir)
+            extracted_root = self.transfer_backend.import_to_cwd(
+                ref,
+                asset_dir,
+                ".",
+                asset_dir,
+                progress=lambda phase, content: self.publish_transfer_progress(
+                    manifest.asset_id,
+                    phase,
+                    {**content, "asset_id": manifest.asset_id, "transfer_id": ref.transfer_id},
+                ),
+            )
             self.media_store.finalize_materialized(manifest, extracted_root)
             self._publish_media_ready(manifest)
         except Exception as exc:
@@ -257,6 +297,7 @@ class Agent:
                     should_end = True
                 elif self.runtime.pending:
                     next_command = self.runtime.pending.popleft().command
+                    self._persist_pending_commands()
             if should_end:
                 self._end_session()
                 continue
@@ -288,6 +329,26 @@ class Agent:
         put_json(self.zenoh, self.keyspace.session_state, self.local_session.state().json())
         self.publish_status()
 
+        approval_id = None
+        if self._requires_approval(command, adapter_payload):
+            approval_id = f"approval_{uuid.uuid4().hex}"
+            with self.runtime.lock:
+                self.runtime.approval_cmd_id = cmd_id
+                self.runtime.approval_id = approval_id
+                self.runtime.approval_decision = None
+                self.runtime.approval_event.clear()
+                self.local_session.status = "waiting_approval"
+                put_json(self.zenoh, self.keyspace.session_state, self.local_session.state().json())
+            self.publish_event(cmd_id, "approval_request", {
+                "approval_id": approval_id,
+                "reason": command.get("approval_reason") or "tool requested approval before execution",
+                "risk": command.get("approval_risk") or adapter_payload.get("options", {}).get("risk") or "unknown",
+                "action": command.get("type"),
+            })
+            self.publish_status()
+            if not await self._await_approval(cmd_id, approval_id):
+                return
+
         exit_code: int | None = 0
         result_status = "succeeded"
         event_count = 0
@@ -307,10 +368,10 @@ class Agent:
                     continue
                 event_count += 1
                 self.publish_event(cmd_id, tool_event.kind, tool_event.content)
-                if adapter_name == "codex":
-                    thread_id = tool_event.content.get("thread_id")
-                    if thread_id:
-                        self.persisted_session.tools["codex"] = ToolSession(native_session_id=thread_id, updated_at=now_ts())
+                if adapter_name in {"codex", "claude"}:
+                    native_session_id = tool_event.content.get("thread_id") or tool_event.content.get("session_id")
+                    if native_session_id:
+                        self.persisted_session.tools[adapter_name] = ToolSession(native_session_id=native_session_id, updated_at=now_ts())
                         self.store.save(self.persisted_session)
             if result_status == "cancelled":
                 self.publish_result(cmd_id, "cancelled", exit_code, "task cancelled", {"event_count": event_count, "tool": adapter_name})
@@ -375,13 +436,28 @@ class Agent:
         try:
             if command.get("type") == "import_transfer":
                 ref = ref_from_dict(payload["transfer"])
-                destination = self.transfer_backend.import_to_cwd(ref, self.local_session.cwd, payload.get("target_path"), self.cfg.root)
+                destination = self.transfer_backend.import_to_cwd(
+                    ref,
+                    self.local_session.cwd,
+                    payload.get("target_path"),
+                    self.cfg.root,
+                    progress=lambda phase, content: self.publish_transfer_progress(
+                        cmd_id,
+                        phase,
+                        {**content, "transfer_id": ref.transfer_id},
+                    ),
+                )
                 listing = list_directory(self.cfg.root, self.local_session.cwd, ".")
                 self.publish_event(cmd_id, "transfer_imported", {"transfer_id": ref.transfer_id, "destination": str(destination)})
                 self.publish_event(cmd_id, "directory_listing", listing)
                 self.publish_result(cmd_id, "succeeded", 0, "transfer imported", {"transfer_id": ref.transfer_id, "destination": str(destination)})
                 return
-            ref = self.transfer_backend.export_from_cwd(self.local_session.cwd, payload.get("path"), self.cfg.root)
+            ref = self.transfer_backend.export_from_cwd(
+                self.local_session.cwd,
+                payload.get("path"),
+                self.cfg.root,
+                progress=lambda phase, content: self.publish_transfer_progress(cmd_id, phase, content),
+            )
             self.publish_event(cmd_id, "transfer_export_ready", {"transfer": ref.to_dict()})
             self.publish_result(cmd_id, "succeeded", 0, "transfer exported", {"transfer": ref.to_dict()})
         except Exception as exc:
@@ -431,6 +507,48 @@ class Agent:
                     sub.undeclare()
             if hasattr(self.zenoh, "close"):
                 self.zenoh.close()
+
+    def _requires_approval(self, command: dict, payload: dict) -> bool:
+        if command.get("requires_approval"):
+            return True
+        options = payload.get("options") or {}
+        if options.get("approval") not in {None, "never"}:
+            return True
+        return False
+
+    async def _await_approval(self, cmd_id: str, approval_id: str) -> bool:
+        while True:
+            if self.runtime.cancel_event.is_set():
+                self.publish_event(cmd_id, "error", {"code": "cancelled", "message": "approval cancelled", "retryable": False})
+                self.publish_result(cmd_id, "cancelled", None, "approval cancelled", {})
+                with self.runtime.lock:
+                    self.runtime.approval_cmd_id = None
+                    self.runtime.approval_id = None
+                    self.runtime.approval_decision = None
+                    self.local_session.status = "idle"
+                    put_json(self.zenoh, self.keyspace.session_state, self.local_session.state().json())
+                    self.publish_status()
+                return False
+            if self.runtime.approval_event.wait(timeout=0.2):
+                break
+            await asyncio.sleep(0)
+        decision = self.runtime.approval_decision or "reject"
+        with self.runtime.lock:
+            self.runtime.approval_cmd_id = None
+            self.runtime.approval_id = None
+            self.runtime.approval_decision = None
+        if decision != "approve":
+            self.publish_event(cmd_id, "error", {"code": "approval_rejected", "message": "approval denied", "retryable": False, "approval_id": approval_id})
+            self.publish_result(cmd_id, "cancelled", None, "approval rejected", {"approval_id": approval_id})
+            self.local_session.status = "idle"
+            put_json(self.zenoh, self.keyspace.session_state, self.local_session.state().json())
+            self.publish_status()
+            return False
+        self.publish_event(cmd_id, "message", {"text": "approval granted", "approval_id": approval_id})
+        self.local_session.status = "running"
+        put_json(self.zenoh, self.keyspace.session_state, self.local_session.state().json())
+        self.publish_status()
+        return True
 
 
 def build_parser() -> argparse.ArgumentParser:

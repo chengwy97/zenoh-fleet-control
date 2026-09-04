@@ -67,17 +67,17 @@ Implemented:
 
 - device/session `idle`, `running`, `ending`, and `ended` state publication
 - `run_shell` and `run_ai(tool=codex)`
+- `run_ai(tool=claude)` via non-interactive Claude Code CLI when installed
 - Codex JSONL event conversion
 - persisted `ZFC session -> Codex thread` mapping in `<cwd>/.zfc/sessions/`
+- persisted `ZFC session -> Claude session` mapping in `<cwd>/.zfc/sessions/`
 - queued follow-up AI messages in one running session
 - `cancel` and `end_session` control messages
+- transfer progress events for archive, upload, download, and extract phases
 
 Not implemented yet:
 
-- approval forwarding to the mobile app
 - Codex TUI slash commands such as `/goal`
-- durable queued-message storage across agent restarts
-- real Claude CLI adapter
 - cloud TLS/mTLS setup
 
 

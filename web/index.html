@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Zenoh Fleet Control</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ZFC CONTROL PLANE</p>
+        <h1>Zenoh Fleet Control</h1>
+      </div>
+      <button id="logout" class="quiet hidden">Sign out</button>
+    </header>
+
+    <section id="loginView" class="login-view">
+      <form id="loginForm" class="panel login-panel">
+        <h2>Connect to bridge</h2>
+        <label>Username<input id="username" value="eame" autocomplete="username"></label>
+        <label>Password<input id="password" type="password" autocomplete="current-password"></label>
+        <button class="primary" type="submit">Connect</button>
+        <p id="loginError" class="error"></p>
+      </form>
+    </section>
+
+    <section id="appView" class="app-view hidden">
+      <aside class="sidebar">
+        <div class="section-heading"><h2>Terminals</h2><button id="refreshDevices" class="icon-button" title="Refresh">↻</button></div>
+        <div id="deviceList" class="device-list"></div>
+      </aside>
+      <section class="workspace">
+        <div class="workspace-head">
+          <div><p class="eyebrow">ACTIVE SESSION</p><h2 id="sessionTitle">No terminal selected</h2><p id="sessionMeta" class="muted"></p></div>
+          <div id="sessionState" class="state">offline</div>
+        </div>
+        <nav class="tabs"><button class="tab active" data-tab="chat">Chat</button><button class="tab" data-tab="files">Files</button></nav>
+        <section id="chatTab" class="tab-content">
+          <div id="timeline" class="timeline"><p class="empty">Select a terminal to view its session.</p></div>
+          <form id="commandForm" class="composer">
+            <div class="composer-tools"><select id="tool"><option value="codex">Codex</option><option value="shell">Shell</option></select><span id="busyHint" class="muted"></span></div>
+            <textarea id="prompt" rows="4" placeholder="Send a prompt or shell command..."></textarea>
+            <div class="composer-actions"><button id="cancel" type="button" class="danger">Cancel</button><button id="end" type="button" class="quiet">End session</button><button class="primary" type="submit">Send</button></div>
+          </form>
+        </section>
+        <section id="filesTab" class="tab-content hidden">
+          <div class="file-toolbar"><button id="parentDir" class="quiet">Up</button><code id="cwd">.</code></div>
+          <div id="directory" class="directory"></div>
+        </section>
+      </section>
+    </section>
+    <p id="globalError" class="error"></p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

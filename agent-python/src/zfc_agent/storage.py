@@ -13,10 +13,17 @@ class ToolSession:
 
 
 @dataclass
+class PendingCommand:
+    command: dict
+    queued_at: int
+
+
+@dataclass
 class PersistedSession:
     session_id: str
     cwd: str
     tools: dict[str, ToolSession] = field(default_factory=dict)
+    pending_commands: list[PendingCommand] = field(default_factory=list)
 
 
 class SessionStore:
@@ -34,6 +41,7 @@ class SessionStore:
             session_id=data["session_id"],
             cwd=data["cwd"],
             tools={name: ToolSession(**value) for name, value in data.get("tools", {}).items()},
+            pending_commands=[PendingCommand(**item) for item in data.get("pending_commands", [])],
         )
 
     def save(self, session: PersistedSession) -> None:

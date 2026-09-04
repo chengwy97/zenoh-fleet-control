@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added `zfc-bridge-api` as the HTTPS entrypoint for Android and browser clients.
+- Added same-origin browser console with login, terminal selection, directory browsing, command sending, cancel/end controls, and event/result polling.
+- Added Android Compose MVP with bridge login, remembered connection settings, terminal/session UI, cwd switching, command sending, control actions, and attachment upload flow.
+- Added bridge-side bearer token expiry checks and username/device/session identity validation before forwarding commands to Zenoh.
+- Added debug-only Android emulator TLS bypass for `https://10.0.2.2`; production and real-device flows still require a trusted HTTPS certificate.
+- Verified Codex execution through the Android emulator path and browser bridge path.
 - Added Zenoh-based directory query support for agents.
 - Added structured `set_cwd` command handling on the agent side.
 - Added local CLI support for directory listing queries.
